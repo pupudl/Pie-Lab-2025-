@@ -9,6 +9,8 @@ import torch.optim as optim
 import matplotlib.pyplot as plt
 from tqdm import tqdm
 import os
+import pandas as pd
+import time
 
 #从纯噪声开始，通过逐步去噪生成样本图像，并保存可视化结果
 def generate_samples(model, epoch, num_samples=5):
@@ -42,6 +44,36 @@ def generate_samples(model, epoch, num_samples=5):
     #恢复训练模式
     model.train()
 
+#绘制训练曲线
+def plot_training_curve(log_file="training_log.csv"):
+    # 读取日志文件
+    df = pd.read_csv(log_file)
+
+    plt.figure(figsize=(12, 5))
+
+    # 绘制损失曲线
+    plt.subplot(1, 2, 1)
+    plt.plot(df['epoch'], df['loss'], 'b-', label='Training Loss')
+    plt.xlabel('Epoch')
+    plt.ylabel('Loss')
+    plt.title('Training Loss Curve')
+    plt.grid(True)
+    plt.legend()
+
+    # 绘制时间曲线
+    plt.subplot(1, 2, 2)
+    plt.plot(df['epoch'], df['time_per_epoch'], 'r-', label='Time per Epoch')
+    plt.xlabel('Epoch')
+    plt.ylabel('Time (seconds)')
+    plt.title('Training Time per Epoch')
+    plt.grid(True)
+    plt.legend()
+
+    plt.tight_layout()
+    plt.savefig('training_curve.png')
+    plt.close()
+    print("训练曲线已保存为 training_curve.png")
+
 #训练
 def train():
     train_loader = get_dataloader()  #获取数据加载器
@@ -49,8 +81,12 @@ def train():
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)  #Adam优化器
     scaler = torch.cuda.amp.GradScaler()  #混合精度梯度缩放器
 
+    #创建训练日志
+    log_df = pd.DataFrame(columns=['epoch', 'loss', 'time_per_epoch'])
+
     for epoch in range(1, epochs + 1):
         epoch_loss = 0.0
+        start_time = time.time()  #记录epoch开始时间
         progress_bar = tqdm(train_loader, desc=f"Epoch {epoch}/{epochs}")
 
         for batch in progress_bar:
@@ -77,13 +113,22 @@ def train():
             epoch_loss += loss.item()
             progress_bar.set_postfix(loss=loss.item())
 
+        #计算epoch耗时
+        epoch_time = time.time() - start_time
         avg_loss = epoch_loss / len(train_loader)
-        print(f"Epoch {epoch} | Avg Loss: {avg_loss:.4f}")
+        print(f"Epoch {epoch} | Avg Loss: {avg_loss:.4f} | Time: {epoch_time:.2f}s")
+
+        # 记录日志
+        log_df.loc[len(log_df)] = [epoch, avg_loss, epoch_time]
+        log_df.to_csv("training_log.csv", index=False)
 
         #每10个epoch保存一次检查点
         if epoch % 10 == 0:
             generate_samples(model, epoch)
             torch.save(model.state_dict(), f"model_epoch_{epoch}.pth")
+
+    #训练完成后绘制曲线
+    plot_training_curve()
 
     return model
 
